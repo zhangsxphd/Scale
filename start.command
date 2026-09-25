@@ -7,8 +7,15 @@ cd "$(dirname "$0")"
 echo "=================================================="
 echo "    启动 MVT-485 智能称重系统 (端口: 5050)"
 echo "=================================================="
-echo "如果端口被占用，将尝试自动清理旧进程..."
-lsof -i :5050 | grep LISTEN | awk '{print $2}' | xargs kill -9 2>/dev/null
+if lsof -nP -iTCP:5050 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "错误：端口 5050 已被占用。请先正常退出已有服务。"
+    exit 1
+fi
 
-echo "正在启动 Flask 服务器..."
-python3 app.py
+if ! python3 -c 'import flask, serial' >/dev/null 2>&1; then
+    echo "缺少依赖，请先执行：python3 -m pip install -r requirements.txt"
+    exit 1
+fi
+
+echo "正在启动 Flask 服务器（仅本机访问）..."
+exec python3 app.py

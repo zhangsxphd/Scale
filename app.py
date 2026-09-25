@@ -1,167 +1,262 @@
-import time
+import logging
+import math
+import os
 import struct
 import threading
+import time
+
 import serial
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, jsonify, render_template, request
 
 app = Flask(__name__)
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger("scale")
 
-PORT = "/dev/cu.usbserial-10"
-BAUDRATE = 38400
-MODBUS_ADDR = 0x01
+PORT = os.getenv("SCALE_SERIAL_PORT", "/dev/cu.usbserial-10")
+BAUDRATE = int(os.getenv("SCALE_BAUDRATE", "38400"))
+MODBUS_ADDR = int(os.getenv("SCALE_MODBUS_ADDR", "1"), 0)
+SERIAL_TIMEOUT = float(os.getenv("SCALE_SERIAL_TIMEOUT", "0.5"))
 
-# 全局串口对象和锁，防止并发冲突
-ser = None
-serial_lock = threading.Lock()
-
-def init_serial():
-    global ser
-    if ser is None or not ser.is_open:
-        try:
-            ser = serial.Serial(PORT, BAUDRATE, timeout=0.5)
-        except Exception as e:
-            print(f"串口打开失败: {e}")
 
 def crc16(data: bytes) -> int:
     crc = 0xFFFF
-    for b in data:
-        crc ^= b
+    for byte in data:
+        crc ^= byte
         for _ in range(8):
-            if crc & 1: crc = (crc >> 1) ^ 0xA001
-            else: crc >>= 1
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
     return crc
 
-def transact(cmd, exp_len):
-    with serial_lock:
-        if not ser or not ser.is_open: return None
-        try:
-            ser.reset_input_buffer()
-            ser.write(cmd)
-            ser.flush()
-            resp = b""
-            end = time.time() + 0.8
-            while len(resp) < exp_len and time.time() < end:
-                c = ser.read(exp_len - len(resp))
-                if c: resp += c
-            if len(resp) < exp_len: return None
-            if struct.unpack("<H", resp[-2:])[0] != crc16(resp[:-2]): return None
-            return resp
-        except Exception as e:
-            print(f"通信错误: {e}")
-            return None
 
-def read_regs(start, count):
-    req = struct.pack(">BBhH", MODBUS_ADDR, 0x03, start, count)
-    resp = transact(req + struct.pack("<H", crc16(req)), 5 + count*2)
-    if not resp: return None
-    return [struct.unpack(">H", resp[3+i*2:5+i*2])[0] for i in range(count)]
+class ModbusError(RuntimeError):
+    pass
 
-def write_reg(reg, val):
-    req = struct.pack(">BbhH", MODBUS_ADDR, 0x06, reg, val)
-    return transact(req + struct.pack("<H", crc16(req)), 8) is not None
 
-def write_32bit(reg, val):
-    h = (val >> 16) & 0xFFFF
-    l = val & 0xFFFF
-    req = struct.pack(">BBhHBHH", MODBUS_ADDR, 0x10, reg, 2, 4, h, l)
-    return transact(req + struct.pack("<H", crc16(req)), 8) is not None
+class ScaleDevice:
+    def __init__(self, port=PORT, baudrate=BAUDRATE, address=MODBUS_ADDR):
+        self.port = port
+        self.baudrate = baudrate
+        self.address = address
+        self._serial = None
+        self._lock = threading.Lock()
 
-@app.route("/")
+    def _open(self):
+        if self._serial and self._serial.is_open:
+            return
+        self.close()
+        self._serial = serial.Serial(
+            self.port, self.baudrate, bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
+            timeout=SERIAL_TIMEOUT, write_timeout=SERIAL_TIMEOUT,
+        )
+        self._serial.reset_input_buffer()
+        self._serial.reset_output_buffer()
+        logger.info("串口已连接: %s @ %s", self.port, self.baudrate)
+
+    def close(self):
+        if self._serial:
+            try:
+                self._serial.close()
+            except serial.SerialException:
+                pass
+        self._serial = None
+
+    def _transact(self, pdu: bytes, expected_length: int) -> bytes:
+        frame = bytes([self.address]) + pdu
+        frame += struct.pack("<H", crc16(frame))
+        last_error = None
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    self._open()
+                    self._serial.reset_input_buffer()
+                    self._serial.write(frame)
+                    self._serial.flush()
+                    response = self._serial.read(expected_length)
+                    if len(response) != expected_length:
+                        raise ModbusError(f"响应不完整: {len(response)}/{expected_length} 字节")
+                    if crc16(response[:-2]) != struct.unpack("<H", response[-2:])[0]:
+                        raise ModbusError("响应 CRC 校验失败")
+                    if response[0] != self.address:
+                        raise ModbusError(f"响应地址错误: {response[0]}")
+                    if response[1] == (pdu[0] | 0x80):
+                        raise ModbusError(f"设备异常码: 0x{response[2]:02X}")
+                    if response[1] != pdu[0]:
+                        raise ModbusError(f"响应功能码错误: 0x{response[1]:02X}")
+                    return response
+                except (serial.SerialException, serial.SerialTimeoutException, OSError, ModbusError) as exc:
+                    last_error = exc
+                    self.close()
+                    if attempt == 0:
+                        time.sleep(0.05)
+            raise ModbusError(str(last_error))
+
+    def read_registers(self, start: int, count: int):
+        pdu = struct.pack(">BHH", 0x03, start, count)
+        response = self._transact(pdu, 5 + count * 2)
+        if response[2] != count * 2:
+            raise ModbusError(f"响应数据长度错误: {response[2]}")
+        return [struct.unpack(">H", response[3 + i * 2:5 + i * 2])[0] for i in range(count)]
+
+    def write_register(self, register: int, value: int):
+        pdu = struct.pack(">BHH", 0x06, register, value)
+        response = self._transact(pdu, 8)
+        if response[1:6] != pdu:
+            raise ModbusError("写单寄存器回显不一致")
+
+    def write_u32(self, register: int, value: int):
+        pdu = struct.pack(">BHHB", 0x10, register, 2, 4) + struct.pack(">I", value)
+        response = self._transact(pdu, 8)
+        if response[2:6] != struct.pack(">HH", register, 2):
+            raise ModbusError("写多寄存器回显不一致")
+
+
+device = ScaleDevice()
+
+
+def signed_u32(high, low):
+    value = (high << 16) | low
+    return value - 0x100000000 if value & 0x80000000 else value
+
+
+def read_status():
+    values = device.read_registers(0x0000, 3)
+    dp = device.read_registers(0x0012, 1)[0]
+    if dp > 4:
+        raise ModbusError(f"设备小数位参数异常: {dp}")
+    raw = signed_u32(values[0], values[1])
+    status = values[2]
+    result = {
+        "weight": raw / (10 ** dp), "raw": raw, "dp": dp,
+        "stable": bool(status & 1), "overload": bool(status & 2),
+        "zero": bool(status & 4), "negative": bool(status & 8),
+    }
+    try:
+        mv = device.read_registers(0x0016, 2)
+        result["mv"] = signed_u32(mv[0], mv[1]) / 1_000_000
+    except ModbusError:
+        result["mv"] = None
+    return result
+
+
+def api_error(message, status=502):
+    return jsonify({"success": False, "error": message}), status
+
+
+@app.get("/")
 def index():
     return render_template("index.html")
 
-@app.route("/api/status")
+
+@app.get("/api/status")
 def api_status():
-    init_serial()
-    dp_vals = read_regs(0x0012, 1)
-    if not dp_vals: return jsonify({"error": "读取参数失败"}), 500
-    dp = dp_vals[0]
-    
-    vals = read_regs(0x0000, 3)
-    mv_vals = read_regs(0x0016, 2)
-    
-    if not vals: return jsonify({"error": "读取重量失败"}), 500
-        
-    raw = (vals[0] << 16) | vals[1]
-    if raw >= 0x80000000: raw -= 0x100000000
-    st = vals[2]
-    
-    mv = 0
-    if mv_vals:
-        mv_raw = (mv_vals[0] << 16) | mv_vals[1]
-        if mv_raw >= 0x80000000: mv_raw -= 0x100000000
-        mv = mv_raw / 1000000.0  # 转换为毫伏 (文档中说是微伏值)
-    
-    return jsonify({
-        "weight": round(raw / (10**dp), dp),
-        "raw": raw,
-        "dp": dp,
-        "mv": mv,
-        "stable": bool(st & 1),
-        "overload": bool(st & 2),
-        "zero": bool(st & 4),
-        "negative": bool(st & 8)
-    })
+    try:
+        return jsonify(read_status())
+    except ModbusError as exc:
+        logger.warning("读取状态失败: %s", exc)
+        return api_error("称重设备通信失败")
+
+
+PARAMETERS = {
+    "power_on_zero": (0x0007, {0, 1}),
+    "zero_track": (0x0008, range(0, 10)),
+    "stable_range": (0x0009, range(1, 100)),
+    "zero_range": (0x000A, range(0, 100)),
+    "filter": (0x000C, range(0, 10)),
+    "ad_rate": (0x000D, {0, 1, 2}),
+    "min_div": (0x0013, {1, 2, 5, 10, 20, 50}),
+    "dp": (0x0012, range(0, 5)),
+}
+
+
+def read_params():
+    p1 = device.read_registers(0x0007, 7)
+    p2 = device.read_registers(0x0012, 4)
+    return {
+        "power_on_zero": p1[0], "zero_track": p1[1],
+        "stable_range": p1[2], "zero_range": p1[3],
+        "filter": p1[5], "ad_rate": p1[6], "dp": p2[0],
+        "min_div": p2[1], "max_range_raw": (p2[2] << 16) | p2[3],
+    }
+
 
 @app.route("/api/params", methods=["GET", "POST"])
 def api_params():
-    if request.method == "POST":
-        data = request.json
-        # 写入参数
-        if 'power_on_zero' in data: write_reg(0x0007, int(data['power_on_zero']))
-        if 'zero_track' in data: write_reg(0x0008, int(data['zero_track']))
-        if 'stable_range' in data: write_reg(0x0009, int(data['stable_range']))
-        if 'zero_range' in data: write_reg(0x000A, int(data['zero_range']))
-        if 'filter' in data: write_reg(0x000C, int(data['filter']))
-        if 'ad_rate' in data: write_reg(0x000D, int(data['ad_rate']))
-        if 'min_div' in data: write_reg(0x0013, int(data['min_div']))
-        if 'dp' in data: write_reg(0x0012, int(data['dp']))
-        return jsonify({"success": True})
-        
-    # 读取参数
-    p1 = read_regs(0x0007, 7) # 7~13
-    p2 = read_regs(0x0012, 4) # 18~21
-    if not p1 or not p2: return jsonify({"error": "读取失败"}), 500
-    
-    max_range = (p2[2] << 16) | p2[3]
-    return jsonify({
-        "power_on_zero": p1[0],
-        "zero_track": p1[1],
-        "stable_range": p1[2],
-        "zero_range": p1[3],
-        "filter": p1[5],
-        "ad_rate": p1[6],
-        "dp": p2[0],
-        "min_div": p2[1],
-        "max_range_raw": max_range
-    })
+    try:
+        if request.method == "GET":
+            return jsonify(read_params())
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or not data:
+            return api_error("请求必须包含 JSON 参数", 400)
+        unknown = set(data) - set(PARAMETERS)
+        if unknown:
+            return api_error(f"未知参数: {', '.join(sorted(unknown))}", 400)
+        parsed = {}
+        for name, value in data.items():
+            try:
+                parsed[name] = int(value)
+            except (TypeError, ValueError):
+                return api_error(f"参数 {name} 必须是整数", 400)
+            if parsed[name] not in PARAMETERS[name][1]:
+                return api_error(f"参数 {name} 超出允许范围", 400)
+        current = read_params()
+        changed = []
+        for name, value in parsed.items():
+            if current[name] == value:
+                continue
+            register = PARAMETERS[name][0]
+            device.write_register(register, value)
+            actual = device.read_registers(register, 1)[0]
+            if actual != value:
+                raise ModbusError(f"参数 {name} 写入后校验失败")
+            changed.append(name)
+        return jsonify({"success": True, "changed": changed, "params": read_params()})
+    except ModbusError as exc:
+        logger.warning("参数操作失败: %s", exc)
+        return api_error("参数操作失败，设备未确认写入")
 
-@app.route("/api/zero", methods=["POST"])
+
+@app.post("/api/zero")
 def api_zero():
-    if write_reg(0x0006, 1): return jsonify({"success": True})
-    return jsonify({"error": "置零失败"}), 500
+    try:
+        if read_status()["overload"]:
+            return api_error("设备处于超载状态，禁止去皮", 409)
+        device.write_register(0x0006, 1)
+        return jsonify({"success": True})
+    except ModbusError as exc:
+        logger.warning("去皮失败: %s", exc)
+        return api_error("去皮失败，设备未确认命令")
 
-@app.route("/api/cal_zero", methods=["POST"])
-def api_cal_zero():
-    if write_32bit(0x001E, 0): return jsonify({"success": True})
-    return jsonify({"error": "零点标定失败"}), 500
 
-@app.route("/api/calibrate", methods=["POST"])
+@app.post("/api/calibrate")
 def api_calibrate():
-    data = request.json
-    weight = float(data.get("weight", 0))
-    point = int(data.get("point", 1)) # 1-4
-    
-    dp_vals = read_regs(0x0012, 1)
-    if not dp_vals: return jsonify({"error": "读取参数失败"}), 500
-    dp = dp_vals[0]
-    
-    val = int(weight * (10**dp))
-    reg = 0x0020 + (point - 1) * 2 # Pt1=0x20, Pt2=0x22, Pt3=0x24, Pt4=0x26
-    
-    if write_32bit(reg, val): return jsonify({"success": True})
-    return jsonify({"error": "标定写入失败"}), 500
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or data.get("confirm") is not True:
+        return api_error("标定需要明确确认", 400)
+    try:
+        weight = float(data.get("weight"))
+        point = int(data.get("point", 1))
+    except (TypeError, ValueError):
+        return api_error("标定重量或标定点无效", 400)
+    if not math.isfinite(weight) or weight <= 0 or point not in range(1, 5):
+        return api_error("标定重量必须为正数，标定点必须为 1-4", 400)
+    try:
+        status = read_status()
+        if not status["stable"] or status["overload"]:
+            return api_error("读数未稳定或设备超载，禁止标定", 409)
+        value = round(weight * (10 ** status["dp"]))
+        if value > 0xFFFFFFFF:
+            return api_error("标定重量超出设备数值范围", 400)
+        device.write_u32(0x0020 + (point - 1) * 2, value)
+        return jsonify({"success": True, "point": point, "weight": weight})
+    except ModbusError as exc:
+        logger.warning("标定失败: %s", exc)
+        return api_error("标定失败，设备未确认写入")
+
+
+@app.get("/health")
+def health():
+    return jsonify({"status": "ok", "serial_port": PORT})
+
 
 if __name__ == "__main__":
-    init_serial()
-    app.run(host="0.0.0.0", port=5050, debug=False)
+    app.run(host=os.getenv("SCALE_HOST", "127.0.0.1"), port=int(os.getenv("SCALE_PORT", "5050")), debug=False)

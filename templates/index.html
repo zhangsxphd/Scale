@@ -4,11 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MVT-485 智能称重</title>
+    <link rel="icon" href="data:,">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; overflow-x: hidden; }
+        html, body { max-width: 100%; overflow-x: hidden; }
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         
@@ -26,7 +28,7 @@
         }
     </style>
 </head>
-<body class="min-h-screen flex flex-col items-center py-10 px-6 relative">
+<body class="min-h-screen flex flex-col items-center py-6 md:py-10 px-3 md:px-6 relative">
     
     <!-- 炫酷背景光效 -->
     <div class="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none"></div>
@@ -55,7 +57,7 @@
 
             <!-- 主读数 -->
             <div class="flex items-baseline gap-4 mt-6 mb-2">
-                <div id="weight-display" class="font-mono text-[8rem] leading-none font-bold tracking-tighter text-white tabular-nums neon-text">0.0</div>
+                <div id="weight-display" class="font-mono text-[clamp(3.5rem,18vw,8rem)] leading-none font-bold tracking-tighter text-white tabular-nums neon-text">0.0</div>
                 <div class="text-3xl font-light text-slate-400">g</div>
             </div>
         </div>
@@ -67,10 +69,10 @@
     </div>
 
     <!-- 极简控制区 -->
-    <div class="max-w-4xl w-full grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
+    <div class="max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
         
         <!-- 卡片 1: 日常去皮 -->
-        <div class="glass-panel p-6 flex flex-col justify-between hover:border-slate-600 transition-colors group cursor-pointer" onclick="doZero()">
+        <div class="glass-panel p-6 flex flex-col justify-between hover:border-slate-600 transition-colors group">
             <div>
                 <div class="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center mb-5 text-slate-300 group-hover:text-white transition-colors shadow-inner border border-slate-700/50">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
@@ -78,19 +80,7 @@
                 <h3 class="text-lg font-medium text-white mb-2">日常去皮</h3>
                 <p class="text-sm text-slate-400 font-light leading-relaxed mb-6">临时清除容器重量，不修改硬件配置。</p>
             </div>
-            <button class="w-full py-3 bg-slate-800 text-slate-300 font-medium rounded-xl group-hover:bg-slate-700 group-hover:text-white transition-all active:scale-95 border border-slate-700">执行去皮</button>
-        </div>
-
-        <!-- 卡片 2: 绝对零点标定 -->
-        <div class="glass-panel p-6 flex flex-col justify-between hover:border-red-500/30 transition-colors group cursor-pointer" onclick="doCalZero()">
-            <div>
-                <div class="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center mb-5 text-red-400 group-hover:text-red-300 transition-colors shadow-inner border border-red-500/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                </div>
-                <h3 class="text-lg font-medium text-white mb-2">硬件零点标定</h3>
-                <p class="text-sm text-slate-400 font-light leading-relaxed mb-6">空载数字漂移时使用。清空秤台后重置物理基准。</p>
-            </div>
-            <button class="w-full py-3 bg-red-500/10 text-red-400 font-medium rounded-xl group-hover:bg-red-500/20 transition-all active:scale-95 border border-red-500/20">强制硬标定</button>
+            <button id="zero-button" onclick="doZero()" class="w-full py-3 bg-slate-800 text-slate-300 font-medium rounded-xl group-hover:bg-slate-700 group-hover:text-white transition-all active:scale-95 border border-slate-700">执行去皮</button>
         </div>
 
         <!-- 卡片 3: 砝码标定 -->
@@ -102,11 +92,11 @@
                 <h3 class="text-lg font-medium text-white mb-2">标准增益标定</h3>
                 
                 <div class="flex items-center gap-2 mb-4 bg-slate-900/50 p-1.5 rounded-xl border border-slate-700/50 focus-within:border-sky-500/50 transition-all">
-                    <input type="number" id="cal-weight" value="500" class="w-full bg-transparent text-white font-mono text-lg text-center outline-none py-1">
+                    <input type="number" id="cal-weight" value="100" min="0.01" step="0.01" class="w-full bg-transparent text-white font-mono text-lg text-center outline-none py-1">
                     <span class="text-slate-500 font-light pr-3">g</span>
                 </div>
             </div>
-            <button onclick="doCalibrate()" class="w-full py-3 bg-sky-500 text-white font-medium rounded-xl shadow-[0_0_15px_rgba(14,165,233,0.3)] hover:bg-sky-400 transition-all active:scale-95">写入砝码重量</button>
+            <button id="calibrate-button" onclick="doCalibrate()" class="w-full py-3 bg-sky-500 text-white font-medium rounded-xl shadow-[0_0_15px_rgba(14,165,233,0.3)] hover:bg-sky-400 transition-all active:scale-95">稳定后执行单点标定</button>
         </div>
 
     </div>
@@ -299,42 +289,42 @@
                 connEl.innerHTML = '<div class="w-1.5 h-1.5 rounded-full bg-red-500"></div>连线中断';
             }
         }
-        setInterval(fetchStatus, 200);
+        fetchStatus();
+        setInterval(fetchStatus, 500);
 
         // ... (后面保存原来的 doZero/doCalZero/doCalibrate/toggleAdvanced/loadParams/saveParams 逻辑)
         async function doZero() {
+            const button = document.getElementById('zero-button');
+            if (button.disabled) return;
+            button.disabled = true;
             try {
                 const res = await fetch('/api/zero', { method: 'POST' });
-                if(res.ok) toast('已执行日常去皮');
-                else toast('去皮失败', 'error');
-            } catch(e) { toast('网络错误', 'error'); }
-        }
-
-        async function doCalZero() {
-            if(!confirm("【危险】\n这会重置传感器的物理零点曲线，请确保秤台上绝对空载！\n\n确认要继续吗？")) return;
-            try {
-                const res = await fetch('/api/cal_zero', { method: 'POST' });
                 const d = await res.json();
-                if(d.success) toast('绝对零点硬件标定完成');
-                else toast('零点标定失败', 'error');
+                if(res.ok) toast('已执行日常去皮');
+                else toast(d.error || '去皮失败', 'error');
             } catch(e) { toast('网络错误', 'error'); }
+            finally { button.disabled = false; }
         }
 
         async function doCalibrate() {
             const weight = document.getElementById('cal-weight').value;
             if(!weight || weight <= 0) return toast("请输入有效的砝码重量", 'error');
             if(!confirm(`确认已放置 ${weight}g 标准砝码？`)) return;
+            const button = document.getElementById('calibrate-button');
+            if (button.disabled) return;
+            button.disabled = true;
             
             try {
                 const res = await fetch('/api/calibrate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ weight: parseFloat(weight), point: 1 })
+                    body: JSON.stringify({ weight: parseFloat(weight), point: 1, confirm: true })
                 });
                 const d = await res.json();
                 if(d.success) toast(`标定成功！基准重: ${weight}g`);
-                else toast('标定失败', 'error');
+                else toast(d.error || '标定失败', 'error');
             } catch(e) { toast('网络错误', 'error'); }
+            finally { button.disabled = false; }
         }
 
         function toggleAdvanced() {
@@ -355,8 +345,8 @@
         async function loadParams() {
             try {
                 const res = await fetch('/api/params');
-                if(!res.ok) return;
                 const data = await res.json();
+                if(!res.ok) return toast(data.error || '参数读取失败', 'error');
                 document.getElementById('param-power_on_zero').value = data.power_on_zero;
                 document.getElementById('param-zero_track').value = data.zero_track;
                 document.getElementById('param-stable_range').value = data.stable_range;
@@ -389,8 +379,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });
-                if(res.ok) toast("参数已保存至传感器");
-                else toast("参数写入失败", 'error');
+                const result = await res.json();
+                if(res.ok) toast(result.changed.length ? `已校验并保存 ${result.changed.length} 项参数` : '参数未变化');
+                else toast(result.error || "参数写入失败", 'error');
             } catch (e) {
                 toast("参数写入网络错误", 'error');
             }
