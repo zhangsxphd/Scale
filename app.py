@@ -175,6 +175,13 @@ PARAMETERS = {
     "dp": (0x0012, range(0, 5)),
 }
 
+# Configuration writes are deliberately deterministic.  The decimal point must
+# be applied before max_range_g because the latter is encoded using target_dp.
+PARAMETER_WRITE_ORDER = (
+    "power_on_zero", "zero_track", "stable_range", "zero_range",
+    "filter", "ad_rate", "min_div",
+)
+
 
 def read_params():
     p1 = device.read_registers(0x0007, 7)
@@ -218,17 +225,21 @@ def api_params():
             if parsed[name] not in PARAMETERS[name][1]:
                 return api_error(f"参数 {name} 超出允许范围", 400)
         current = read_params()
+        target_dp = parsed.get("dp", current["dp"])
+        target_max_range_raw = current["max_range_raw"]
+        if "max_range_g" in parsed:
+            target_max_range_raw = round(parsed["max_range_g"] * (10 ** target_dp))
+            if target_max_range_raw > 0xFFFFFFFF:
+                return api_error("最大量程超出设备 32 位数值范围", 400)
+        target_min_div = parsed.get("min_div", current["min_div"])
+        if target_max_range_raw > target_min_div * 100_000:
+            return api_error("最大量程原始值不能超过最小分度值的 100000 倍", 400)
+
         changed = []
-        for name, value in parsed.items():
-            if name == "max_range_g":
-                raw_range = round(value * (10 ** current["dp"]))
-                if raw_range != current["max_range_raw"]:
-                    device.write_u32(0x0014, raw_range)
-                    verify = device.read_registers(0x0014, 2)
-                    if ((verify[0] << 16) | verify[1]) != raw_range:
-                        raise ModbusError("最大量程写入后校验失败")
-                    changed.append(name)
+        for name in PARAMETER_WRITE_ORDER:
+            if name not in parsed:
                 continue
+            value = parsed[name]
             if current[name] == value:
                 continue
             register = PARAMETERS[name][0]
@@ -237,6 +248,20 @@ def api_params():
             if actual != value:
                 raise ModbusError(f"参数 {name} 写入后校验失败")
             changed.append(name)
+
+        if "dp" in parsed and current["dp"] != target_dp:
+            device.write_register(PARAMETERS["dp"][0], target_dp)
+            actual = device.read_registers(PARAMETERS["dp"][0], 1)[0]
+            if actual != target_dp:
+                raise ModbusError("参数 dp 写入后校验失败")
+            changed.append("dp")
+
+        if "max_range_g" in parsed and target_max_range_raw != current["max_range_raw"]:
+            device.write_u32(0x0014, target_max_range_raw)
+            verify = device.read_registers(0x0014, 2)
+            if ((verify[0] << 16) | verify[1]) != target_max_range_raw:
+                raise ModbusError("最大量程写入后校验失败")
+            changed.append("max_range_g")
         return jsonify({"success": True, "changed": changed, "params": read_params()})
     except ModbusError as exc:
         logger.warning("参数操作失败: %s", exc)

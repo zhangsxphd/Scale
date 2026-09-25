@@ -117,7 +117,7 @@
                     <h3 class="text-lg font-medium text-white">第 2 步：多点加载标定</h3>
                     <p class="text-sm text-slate-400 font-light mt-1">四个点同时显示；填写对应砝码重量后，点击该点按钮才会写入。查看读数不需要点击。</p>
                 </div>
-                <div class="text-right"><div id="cal-progress" class="text-sm text-amber-200">标定进度 0 / 5</div><span class="text-xs text-amber-300/80">请按重量从小到大使用点 1 → 点 4</span></div>
+                <div class="text-right"><div id="cal-progress" class="text-sm text-amber-200">本次标定会话进度 0 / 5</div><span class="text-xs text-amber-300/80">请按重量从小到大使用点 1 → 点 4</span></div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
@@ -441,7 +441,7 @@
         function updateCalibrationState(state) {
             currentCalibrationState = state;
             const completed = Object.keys(state.points || {}).length;
-            document.getElementById('cal-progress').innerText = `标定进度 ${state.zero_complete ? completed + 1 : 0} / 5`;
+            document.getElementById('cal-progress').innerText = `本次标定会话进度 ${state.zero_complete ? completed + 1 : 0} / 5`;
             document.getElementById('cal-zero-button').innerText = state.zero_complete ? '✓ 零点已标定' : '确认空载并标定零点';
             for (let point = 1; point <= 4; point++) {
                 const button = document.getElementById(`point-button-${point}`);
