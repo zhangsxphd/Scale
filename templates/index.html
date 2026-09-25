@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MVT-485 智能称重</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; overflow-x: hidden; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        
+        .neon-text {
+            text-shadow: 0 0 40px rgba(56, 189, 248, 0.3);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-10 px-6 relative">
+    
+    <!-- 炫酷背景光效 -->
+    <div class="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none"></div>
+    <div class="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/20 rounded-full blur-[120px] pointer-events-none"></div>
+
+    <!-- 顶部标题 -->
+    <div class="max-w-4xl w-full flex justify-between items-center mb-8 relative z-10">
+        <div>
+            <h1 class="text-2xl font-semibold text-white tracking-tight">智能称重中枢</h1>
+            <p class="text-slate-400 text-sm mt-1 font-light tracking-wide">MVT-485Pro / MAX: 3kg</p>
+        </div>
+        <div id="connection-status" class="flex items-center gap-2 px-4 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-full text-xs font-medium border border-emerald-500/20">
+            <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
+            实时连线
+        </div>
+    </div>
+
+    <!-- 核心读数与实时曲线区 -->
+    <div class="max-w-4xl w-full glass-panel overflow-hidden mb-8 relative flex flex-col z-10">
+        <div class="p-10 flex flex-col items-center justify-center relative z-10">
+            <!-- 状态标签 -->
+            <div class="absolute top-6 left-6 flex gap-2">
+                <span id="badge-stable" class="px-3 py-1 text-xs font-medium rounded-full bg-slate-800/50 text-slate-300 border border-slate-700/50 backdrop-blur-md">等待数据</span>
+                <span id="badge-zero" class="px-3 py-1 text-xs font-medium rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/20 backdrop-blur-md opacity-0 transition-opacity">零点基准</span>
+            </div>
+
+            <!-- 主读数 -->
+            <div class="flex items-baseline gap-4 mt-6 mb-2">
+                <div id="weight-display" class="font-mono text-[8rem] leading-none font-bold tracking-tighter text-white tabular-nums neon-text">0.0</div>
+                <div class="text-3xl font-light text-slate-400">g</div>
+            </div>
+        </div>
+
+        <!-- 实时数据曲线 -->
+        <div class="w-full h-48 relative -mt-8">
+            <canvas id="weightChart"></canvas>
+        </div>
+    </div>
+
+    <!-- 极简控制区 -->
+    <div class="max-w-4xl w-full grid grid-cols-1 md:grid-cols-3 gap-6 relative z-10">
+        
+        <!-- 卡片 1: 日常去皮 -->
+        <div class="glass-panel p-6 flex flex-col justify-between hover:border-slate-600 transition-colors group cursor-pointer" onclick="doZero()">
+            <div>
+                <div class="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center mb-5 text-slate-300 group-hover:text-white transition-colors shadow-inner border border-slate-700/50">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                </div>
+                <h3 class="text-lg font-medium text-white mb-2">日常去皮</h3>
+                <p class="text-sm text-slate-400 font-light leading-relaxed mb-6">临时清除容器重量，不修改硬件配置。</p>
+            </div>
+            <button class="w-full py-3 bg-slate-800 text-slate-300 font-medium rounded-xl group-hover:bg-slate-700 group-hover:text-white transition-all active:scale-95 border border-slate-700">执行去皮</button>
+        </div>
+
+        <!-- 卡片 2: 绝对零点标定 -->
+        <div class="glass-panel p-6 flex flex-col justify-between hover:border-red-500/30 transition-colors group cursor-pointer" onclick="doCalZero()">
+            <div>
+                <div class="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center mb-5 text-red-400 group-hover:text-red-300 transition-colors shadow-inner border border-red-500/20">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                </div>
+                <h3 class="text-lg font-medium text-white mb-2">硬件零点标定</h3>
+                <p class="text-sm text-slate-400 font-light leading-relaxed mb-6">空载数字漂移时使用。清空秤台后重置物理基准。</p>
+            </div>
+            <button class="w-full py-3 bg-red-500/10 text-red-400 font-medium rounded-xl group-hover:bg-red-500/20 transition-all active:scale-95 border border-red-500/20">强制硬标定</button>
+        </div>
+
+        <!-- 卡片 3: 砝码标定 -->
+        <div class="glass-panel p-6 flex flex-col justify-between hover:border-sky-500/30 transition-colors">
+            <div>
+                <div class="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center mb-5 text-sky-400 shadow-inner border border-sky-500/20">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                </div>
+                <h3 class="text-lg font-medium text-white mb-2">标准增益标定</h3>
+                
+                <div class="flex items-center gap-2 mb-4 bg-slate-900/50 p-1.5 rounded-xl border border-slate-700/50 focus-within:border-sky-500/50 transition-all">
+                    <input type="number" id="cal-weight" value="500" class="w-full bg-transparent text-white font-mono text-lg text-center outline-none py-1">
+                    <span class="text-slate-500 font-light pr-3">g</span>
+                </div>
+            </div>
+            <button onclick="doCalibrate()" class="w-full py-3 bg-sky-500 text-white font-medium rounded-xl shadow-[0_0_15px_rgba(14,165,233,0.3)] hover:bg-sky-400 transition-all active:scale-95">写入砝码重量</button>
+        </div>
+
+    </div>
+
+    <!-- 高级设置开关 -->
+    <div class="max-w-4xl w-full mt-10 flex justify-center relative z-10">
+        <button onclick="toggleAdvanced()" class="flex items-center gap-2 text-slate-500 hover:text-slate-300 font-medium text-xs tracking-wider transition-colors">
+            <svg id="adv-icon" class="w-3 h-3 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+            高级硬件参数
+        </button>
+    </div>
+
+    <!-- 高级设置面板 -->
+    <div id="advanced-panel" class="max-w-4xl w-full glass-panel mt-4 p-8 hidden opacity-0 transition-opacity duration-300 relative z-10">
+        <div class="flex justify-between items-center mb-6">
+            <h3 class="text-lg font-medium text-white">底层信号配置</h3>
+            <button onclick="loadParams()" class="text-xs px-4 py-2 bg-slate-800 text-slate-300 rounded-lg border border-slate-700 hover:bg-slate-700 transition-colors">读取当前</button>
+        </div>
+        
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">上电清零开关</label>
+                <select id="param-power_on_zero" class="w-full bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2.5 outline-none focus:border-sky-500/50">
+                    <option value="0">关闭</option><option value="1">开启</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">零点跟踪 (d)</label>
+                <input type="number" id="param-zero_track" class="w-full bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2.5 outline-none focus:border-sky-500/50 font-mono">
+            </div>
+            <div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">判稳范围 (d)</label>
+                <input type="number" id="param-stable_range" class="w-full bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2.5 outline-none focus:border-sky-500/50 font-mono">
+            </div>
+            <div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">清零范围 (%)</label>
+                <input type="number" id="param-zero_range" class="w-full bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2.5 outline-none focus:border-sky-500/50 font-mono">
+            </div>
+            
+            <div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">AD采样率</label>
+                <select id="param-ad_rate" class="w-full bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2.5 outline-none focus:border-sky-500/50">
+                    <option value="0">10 Hz (平滑)</option><option value="1">40 Hz (标准)</option><option value="2">640 Hz (极速)</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">稳态滤波 (0-9)</label>
+                <input type="number" id="param-filter" class="w-full bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2.5 outline-none focus:border-sky-500/50 font-mono">
+            </div>
+            <div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">分度值</label>
+                <select id="param-min_div" class="w-full bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2.5 outline-none focus:border-sky-500/50">
+                    <option value="1">1</option><option value="2">2</option><option value="5">5</option>
+                    <option value="10">10</option><option value="20">20</option><option value="50">50</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">小数位数</label>
+                <input type="number" id="param-dp" class="w-full bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2.5 outline-none focus:border-sky-500/50 font-mono">
+            </div>
+        </div>
+
+        <div class="mt-8 flex justify-between items-center border-t border-slate-700/50 pt-6">
+            <div class="text-xs text-slate-500">
+                硬件设定最大量程: <strong id="param-max_range" class="font-mono text-slate-300">--</strong>
+            </div>
+            <button onclick="saveParams()" class="px-6 py-2.5 bg-white text-slate-900 font-medium rounded-xl hover:bg-slate-200 transition-all text-sm">写入设备</button>
+        </div>
+    </div>
+
+    <!-- Toast 提示 -->
+    <div id="toast-container" class="fixed top-6 right-6 z-50 flex flex-col gap-3"></div>
+
+    <script>
+        // ====== 图表初始化 ======
+        let chartInstance = null;
+        const maxDataPoints = 60; // 显示60个点 (约12秒)
+        const chartData = new Array(maxDataPoints).fill(0);
+        const chartLabels = new Array(maxDataPoints).fill('');
+
+        function initChart() {
+            const ctx = document.getElementById('weightChart').getContext('2d');
+            
+            // 科幻感青蓝渐变
+            let gradient = ctx.createLinearGradient(0, 0, 0, 150);
+            gradient.addColorStop(0, 'rgba(56, 189, 248, 0.4)'); // sky-400
+            gradient.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        data: chartData,
+                        borderColor: '#38bdf8', // sky-400
+                        borderWidth: 2,
+                        backgroundColor: gradient,
+                        fill: true,
+                        tension: 0.5, // 优雅的曲线
+                        pointRadius: 0,
+                        pointHoverRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 0 }, 
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    scales: {
+                        x: { display: false },
+                        y: { 
+                            display: false,
+                            suggestedMin: -5,  // 强制给 Y 轴一个缓冲区间
+                            suggestedMax: 5    // 这样 0.1g 的微小跳动在图上就是一条直线
+                        } 
+                    },
+                    layout: { padding: { left: -10, bottom: -10 } }
+                }
+            });
+        }
+        initChart();
+
+        // 极简 Toast
+        function toast(msg, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            const bg = type === 'success' ? 'bg-slate-800/90 text-white border-slate-700' : 'bg-red-900/90 text-red-200 border-red-800';
+            el.className = `flex items-center gap-3 px-5 py-4 rounded-2xl shadow-2xl backdrop-blur-md border text-sm font-medium transform transition-all duration-300 translate-y-[-20px] opacity-0 ${bg}`;
+            el.innerHTML = msg;
+            container.appendChild(el);
+            setTimeout(() => { el.classList.remove('translate-y-[-20px]', 'opacity-0'); }, 10);
+            setTimeout(() => {
+                el.classList.add('opacity-0', 'translate-x-10');
+                setTimeout(() => el.remove(), 300);
+            }, 3000);
+        }
+
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    const w = data.weight;
+                    
+                    document.getElementById('weight-display').innerText = w.toFixed(data.dp);
+                    
+                    chartData.push(w);
+                    chartData.shift(); 
+                    
+                    // 智能动态 Y 轴：既能压平微小噪点，又能展示放上重物时漂亮的波峰曲线
+                    const maxData = Math.max(...chartData);
+                    const minData = Math.min(...chartData);
+                    const range = maxData - minData;
+
+                    if (range < 5) {
+                        // 平稳时：给定 10g 的视觉窗口，把零点几克的噪点压成直线
+                        const mid = (maxData + minData) / 2;
+                        chartInstance.options.scales.y.min = mid - 5;
+                        chartInstance.options.scales.y.max = mid + 5;
+                    } else {
+                        // 变化时（如放上物品）：上下留出 10% 的唯美留白，展示完整的上升/下降曲线
+                        chartInstance.options.scales.y.min = minData - (range * 0.1);
+                        chartInstance.options.scales.y.max = maxData + (range * 0.1);
+                    }
+                    
+                    chartInstance.update();
+
+                    const stableEl = document.getElementById('badge-stable');
+                    if (data.stable) {
+                        stableEl.className = 'px-3 py-1 text-xs font-medium rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 backdrop-blur-md';
+                        stableEl.innerText = '读数稳定';
+                    } else {
+                        stableEl.className = 'px-3 py-1 text-xs font-medium rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/20 backdrop-blur-md';
+                        stableEl.innerText = '正在跳动';
+                    }
+
+                    const zeroEl = document.getElementById('badge-zero');
+                    zeroEl.style.opacity = data.zero ? '1' : '0';
+
+                    const connEl = document.getElementById('connection-status');
+                    connEl.className = 'flex items-center gap-2 px-4 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-full text-xs font-medium border border-emerald-500/20';
+                    connEl.innerHTML = '<div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>实时连线';
+
+                } else {
+                    throw new Error('断开');
+                }
+            } catch(e) {
+                const connEl = document.getElementById('connection-status');
+                connEl.className = 'flex items-center gap-2 px-4 py-1.5 bg-red-500/10 text-red-400 rounded-full text-xs font-medium border border-red-500/20';
+                connEl.innerHTML = '<div class="w-1.5 h-1.5 rounded-full bg-red-500"></div>连线中断';
+            }
+        }
+        setInterval(fetchStatus, 200);
+
+        // ... (后面保存原来的 doZero/doCalZero/doCalibrate/toggleAdvanced/loadParams/saveParams 逻辑)
+        async function doZero() {
+            try {
+                const res = await fetch('/api/zero', { method: 'POST' });
+                if(res.ok) toast('已执行日常去皮');
+                else toast('去皮失败', 'error');
+            } catch(e) { toast('网络错误', 'error'); }
+        }
+
+        async function doCalZero() {
+            if(!confirm("【危险】\n这会重置传感器的物理零点曲线，请确保秤台上绝对空载！\n\n确认要继续吗？")) return;
+            try {
+                const res = await fetch('/api/cal_zero', { method: 'POST' });
+                const d = await res.json();
+                if(d.success) toast('绝对零点硬件标定完成');
+                else toast('零点标定失败', 'error');
+            } catch(e) { toast('网络错误', 'error'); }
+        }
+
+        async function doCalibrate() {
+            const weight = document.getElementById('cal-weight').value;
+            if(!weight || weight <= 0) return toast("请输入有效的砝码重量", 'error');
+            if(!confirm(`确认已放置 ${weight}g 标准砝码？`)) return;
+            
+            try {
+                const res = await fetch('/api/calibrate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ weight: parseFloat(weight), point: 1 })
+                });
+                const d = await res.json();
+                if(d.success) toast(`标定成功！基准重: ${weight}g`);
+                else toast('标定失败', 'error');
+            } catch(e) { toast('网络错误', 'error'); }
+        }
+
+        function toggleAdvanced() {
+            const panel = document.getElementById('advanced-panel');
+            const icon = document.getElementById('adv-icon');
+            if(panel.classList.contains('hidden')) {
+                panel.classList.remove('hidden');
+                setTimeout(() => panel.classList.remove('opacity-0'), 10);
+                icon.classList.add('rotate-180');
+                loadParams(); 
+            } else {
+                panel.classList.add('opacity-0');
+                icon.classList.remove('rotate-180');
+                setTimeout(() => panel.classList.add('hidden'), 300);
+            }
+        }
+
+        async function loadParams() {
+            try {
+                const res = await fetch('/api/params');
+                if(!res.ok) return;
+                const data = await res.json();
+                document.getElementById('param-power_on_zero').value = data.power_on_zero;
+                document.getElementById('param-zero_track').value = data.zero_track;
+                document.getElementById('param-stable_range').value = data.stable_range;
+                document.getElementById('param-zero_range').value = data.zero_range;
+                document.getElementById('param-ad_rate').value = data.ad_rate;
+                document.getElementById('param-filter').value = data.filter;
+                document.getElementById('param-min_div').value = data.min_div;
+                document.getElementById('param-dp').value = data.dp;
+                document.getElementById('param-max_range').innerText = data.max_range_raw;
+                toast('底层参数读取完毕');
+            } catch (e) {
+                toast('参数读取失败', 'error');
+            }
+        }
+
+        async function saveParams() {
+            const data = {
+                power_on_zero: document.getElementById('param-power_on_zero').value,
+                zero_track: document.getElementById('param-zero_track').value,
+                stable_range: document.getElementById('param-stable_range').value,
+                zero_range: document.getElementById('param-zero_range').value,
+                ad_rate: document.getElementById('param-ad_rate').value,
+                filter: document.getElementById('param-filter').value,
+                min_div: document.getElementById('param-min_div').value,
+                dp: document.getElementById('param-dp').value
+            };
+            try {
+                const res = await fetch('/api/params', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                if(res.ok) toast("参数已保存至传感器");
+                else toast("参数写入失败", 'error');
+            } catch (e) {
+                toast("参数写入网络错误", 'error');
+            }
+        }
+    </script>
+</body>
+</html>
