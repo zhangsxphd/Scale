@@ -46,6 +46,16 @@
         </div>
     </div>
 
+    <!-- 连接参数：参考厂家上位机；点击应用才会切换串口 -->
+    <div class="max-w-4xl w-full glass-panel p-4 mb-6 relative z-10">
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+            <label class="text-xs text-slate-400">端口号<select id="config-port" class="mt-1 w-full bg-slate-900/70 border border-slate-700 text-slate-200 rounded-lg p-2 text-sm"></select></label>
+            <label class="text-xs text-slate-400">波特率<select id="config-baudrate" class="mt-1 w-full bg-slate-900/70 border border-slate-700 text-slate-200 rounded-lg p-2 text-sm"><option>9600</option><option>19200</option><option selected>38400</option><option>57600</option><option>115200</option></select></label>
+            <label class="text-xs text-slate-400">通信地址<input id="config-address" type="number" min="1" max="247" value="1" class="mt-1 w-full bg-slate-900/70 border border-slate-700 text-slate-200 rounded-lg p-2 text-sm"></label>
+            <button onclick="applyConfig()" class="py-2 bg-slate-700 text-slate-200 rounded-lg hover:bg-slate-600 text-sm">应用连接参数</button>
+        </div>
+    </div>
+
     <!-- 核心读数与实时曲线区 -->
     <div class="max-w-4xl w-full glass-panel overflow-hidden mb-8 relative flex flex-col z-10">
         <div class="p-10 flex flex-col items-center justify-center relative z-10">
@@ -71,45 +81,62 @@
 
     <!-- 极简控制区 -->
     <div class="max-w-4xl w-full grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
-        
-        <!-- 卡片 1: 日常去皮 -->
+
+        <!-- 日常去皮：只改临时零点，不改变标定曲线 -->
         <div class="glass-panel p-6 flex flex-col justify-between hover:border-slate-600 transition-colors group">
             <div>
                 <div class="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center mb-5 text-slate-300 group-hover:text-white transition-colors shadow-inner border border-slate-700/50">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
                 </div>
-                <h3 class="text-lg font-medium text-white mb-2">第 1 步：空载置零</h3>
-                <p class="text-sm text-slate-400 font-light leading-relaxed mb-6">先清空秤台并等待稳定，再建立本次标定的零点。</p>
+                <h3 class="text-lg font-medium text-white mb-2">日常去皮</h3>
+                <p class="text-sm text-slate-400 font-light leading-relaxed mb-6">临时清除容器重量，不修改标定曲线。空载校准请使用下方零点标定。</p>
             </div>
-            <button id="zero-button" onclick="doZero()" class="w-full py-3 bg-slate-800 text-slate-300 font-medium rounded-xl group-hover:bg-slate-700 group-hover:text-white transition-all active:scale-95 border border-slate-700">确认空载并置零</button>
+            <button id="tare-button" onclick="doTare()" class="w-full py-3 bg-slate-800 text-slate-300 font-medium rounded-xl group-hover:bg-slate-700 group-hover:text-white transition-all active:scale-95 border border-slate-700">执行去皮</button>
         </div>
 
-        <!-- 卡片 3: 砝码标定 -->
-        <div class="glass-panel p-6 flex flex-col justify-between hover:border-sky-500/30 transition-colors">
+        <!-- 空载零点标定：厂家协议 0x0016 -->
+        <div class="glass-panel p-6 flex flex-col justify-between hover:border-amber-500/30 transition-colors">
             <div>
-                <div class="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center mb-5 text-sky-400 shadow-inner border border-sky-500/20">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                <div class="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-5 text-amber-300 shadow-inner border border-amber-500/20">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 3v18m-7-7 7 7 7-7M5 6h14"></path></svg>
                 </div>
-                <h3 class="text-lg font-medium text-white mb-2">第 2 步：标准砝码标定</h3>
-                
-                <div class="flex items-center gap-2 mb-4 bg-slate-900/50 p-1.5 rounded-xl border border-slate-700/50 focus-within:border-sky-500/50 transition-all">
-                    <input type="number" id="cal-weight" value="100" min="0.01" step="0.01" class="w-full bg-transparent text-white font-mono text-lg text-center outline-none py-1">
-                    <span class="text-slate-500 font-light pr-3">g</span>
-                </div>
-                <div class="flex items-center gap-2 mb-3">
-                    <label for="cal-point" class="text-xs text-slate-400">写入标定点</label>
-                    <select id="cal-point" class="flex-1 bg-slate-900/50 border border-slate-700/50 text-slate-300 text-sm rounded-lg p-2 outline-none">
-                        <option value="1">点 1（首次标定）</option>
-                        <option value="2">点 2（多点标定）</option>
-                        <option value="3">点 3（多点标定）</option>
-                        <option value="4">点 4（多点标定）</option>
-                    </select>
-                </div>
-                <p class="text-xs text-amber-300/80 leading-relaxed mb-4">校准会写入设备。同一点再次校准会覆盖旧结果；仅检查重量时不要点击此按钮。</p>
+                <h3 class="text-lg font-medium text-white mb-2">第 1 步：空载零点标定</h3>
+                <p class="text-sm text-slate-400 font-light leading-relaxed mb-6">清空秤台并等待稳定后使用。会修改设备零点参数，校准前必须执行。</p>
             </div>
-            <button id="calibrate-button" onclick="doCalibrate()" class="w-full py-3 bg-sky-500 text-white font-medium rounded-xl shadow-[0_0_15px_rgba(14,165,233,0.3)] hover:bg-sky-400 transition-all active:scale-95">写入所选标定点</button>
+            <button id="cal-zero-button" onclick="doCalZero()" class="w-full py-3 bg-amber-500/15 text-amber-200 font-medium rounded-xl hover:bg-amber-500/25 transition-all active:scale-95 border border-amber-500/30">确认空载并标定零点</button>
         </div>
 
+        <div class="md:col-span-2 glass-panel p-6">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+                <div>
+                    <h3 class="text-lg font-medium text-white">第 2 步：多点加载标定</h3>
+                    <p class="text-sm text-slate-400 font-light mt-1">四个点同时显示；填写对应砝码重量后，点击该点按钮才会写入。查看读数不需要点击。</p>
+                </div>
+                <span class="text-xs text-amber-300/80">请按重量从小到大使用点 1 → 点 4</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
+                    <div class="text-sm text-slate-300 mb-3">加载点 1 <span class="text-slate-500">0x001E</span></div>
+                    <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-1" value="500" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
+                    <button onclick="doPointCal(1)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">应用点 1</button>
+                </div>
+                <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
+                    <div class="text-sm text-slate-300 mb-3">加载点 2 <span class="text-slate-500">0x0020</span></div>
+                    <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-2" value="1000" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
+                    <button onclick="doPointCal(2)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">应用点 2</button>
+                </div>
+                <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
+                    <div class="text-sm text-slate-300 mb-3">加载点 3 <span class="text-slate-500">0x0022</span></div>
+                    <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-3" value="2000" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
+                    <button onclick="doPointCal(3)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">应用点 3</button>
+                </div>
+                <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
+                    <div class="text-sm text-slate-300 mb-3">加载点 4 <span class="text-slate-500">0x0024</span></div>
+                    <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-4" value="3000" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
+                    <button onclick="doPointCal(4)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">应用点 4</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- 高级设置开关 -->
@@ -303,19 +330,58 @@
             }
         }
         fetchStatus();
+        loadConfig();
         setInterval(fetchStatus, 500);
 
         // ... (后面保存原来的 doZero/doCalZero/doCalibrate/toggleAdvanced/loadParams/saveParams 逻辑)
-        async function doZero() {
-            if(!confirm('请确认秤台已经完全清空，并且读数稳定。\n\n是否执行空载置零？')) return;
-            const button = document.getElementById('zero-button');
+        async function doTare() {
+            if(!confirm('确认将当前稳定读数作为临时零点？这不会修改标定曲线。')) return;
+            const button = document.getElementById('tare-button');
             if (button.disabled) return;
             button.disabled = true;
             try {
-                const res = await fetch('/api/cal_zero', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ confirm: true })
-                });
+                const res = await fetch('/api/zero', { method: 'POST' });
+                const d = await res.json();
+                if(res.ok) toast('已执行日常去皮');
+                else toast(d.error || '去皮失败', 'error');
+            } catch(e) { toast('网络错误', 'error'); }
+            finally { button.disabled = false; }
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                if (!res.ok) return;
+                const select = document.getElementById('config-port');
+                select.innerHTML = data.ports.map(port => `<option value="${port}">${port}</option>`).join('');
+                select.value = data.port;
+                document.getElementById('config-baudrate').value = data.baudrate;
+                document.getElementById('config-address').value = data.address;
+            } catch(e) { /* 状态轮询会继续报告通信结果 */ }
+        }
+
+        async function applyConfig() {
+            const payload = {
+                port: document.getElementById('config-port').value,
+                baudrate: document.getElementById('config-baudrate').value,
+                address: document.getElementById('config-address').value
+            };
+            try {
+                const res = await fetch('/api/config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+                const data = await res.json();
+                if (res.ok) toast('连接参数已应用，正在重新连接');
+                else toast(data.error || '连接参数应用失败', 'error');
+            } catch(e) { toast('连接参数网络错误', 'error'); }
+        }
+
+        async function doCalZero() {
+            if(!confirm('请确认秤台已经完全清空并且读数稳定。\n\n这会修改设备零点参数，继续吗？')) return;
+            const button = document.getElementById('cal-zero-button');
+            if (button.disabled) return;
+            button.disabled = true;
+            try {
+                const res = await fetch('/api/cal_zero', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({confirm: true}) });
                 const d = await res.json();
                 if(res.ok) toast('空载零点标定完成');
                 else toast(d.error || '零点标定失败', 'error');
@@ -323,12 +389,11 @@
             finally { button.disabled = false; }
         }
 
-        async function doCalibrate() {
-            const weight = document.getElementById('cal-weight').value;
-            const point = parseInt(document.getElementById('cal-point').value, 10);
+        async function doPointCal(point) {
+            const weight = document.getElementById(`cal-weight-${point}`).value;
             if(!weight || weight <= 0) return toast("请输入有效的砝码重量", 'error');
-            if(!confirm(`即将把 ${weight}g 写入标定点 ${point}。\n\n这会覆盖该点原有结果；如果只是检查读数，请取消。\n确认秤台稳定并继续吗？`)) return;
-            const button = document.getElementById('calibrate-button');
+            if(!confirm(`即将把 ${weight}g 写入加载点 ${point}。\n\n这会覆盖该点原有结果；如果只是检查读数，请取消。\n确认秤台稳定并继续吗？`)) return;
+            const button = document.querySelector(`button[onclick="doPointCal(${point})"]`);
             if (button.disabled) return;
             button.disabled = true;
             
@@ -339,7 +404,7 @@
                     body: JSON.stringify({ weight: parseFloat(weight), point, confirm: true })
                 });
                 const d = await res.json();
-                if(d.success) toast(`标定点 ${point} 写入成功：${weight}g`);
+                if(d.success) toast(`加载点 ${point} 写入成功：${weight}g`);
                 else toast(d.error || '标定失败', 'error');
             } catch(e) { toast('网络错误', 'error'); }
             finally { button.disabled = false; }

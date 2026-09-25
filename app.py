@@ -6,6 +6,7 @@ import threading
 import time
 
 import serial
+from serial.tools import list_ports
 from flask import Flask, jsonify, render_template, request
 
 app = Flask(__name__)
@@ -59,6 +60,11 @@ class ScaleDevice:
             except serial.SerialException:
                 pass
         self._serial = None
+
+    def configure(self, port, baudrate, address):
+        with self._lock:
+            self.close()
+            self.port, self.baudrate, self.address = port, baudrate, address
 
     def _transact(self, pdu: bytes, expected_length: int) -> bytes:
         frame = bytes([self.address]) + pdu
@@ -299,6 +305,29 @@ def api_calibrate():
 @app.get("/health")
 def health():
     return jsonify({"status": "ok", "serial_port": PORT})
+
+
+@app.route("/api/config", methods=["GET", "POST"])
+def api_config():
+    if request.method == "GET":
+        ports = sorted({p.device for p in list_ports.comports()} | {device.port})
+        return jsonify({"port": device.port, "baudrate": device.baudrate, "address": device.address, "ports": ports})
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return api_error("请求必须包含 JSON 参数", 400)
+    port = str(data.get("port", device.port))
+    try:
+        baudrate = int(data.get("baudrate", device.baudrate))
+        address = int(data.get("address", device.address), 0) if isinstance(data.get("address", device.address), str) else int(data.get("address", device.address))
+    except (TypeError, ValueError):
+        return api_error("端口、波特率或地址无效", 400)
+    if baudrate not in {9600, 19200, 38400, 57600, 115200} or not 1 <= address <= 247:
+        return api_error("波特率或 Modbus 地址超出允许范围", 400)
+    known_ports = {p.device for p in list_ports.comports()}
+    if port != device.port and port not in known_ports:
+        return api_error("指定串口当前不可用", 400)
+    device.configure(port, baudrate, address)
+    return jsonify({"success": True, "port": port, "baudrate": baudrate, "address": address})
 
 
 if __name__ == "__main__":

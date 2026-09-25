@@ -14,6 +14,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "ok")
 
+    def test_config_rejects_unsupported_baudrate(self):
+        response = self.client.post("/api/config", json={"baudrate": 12345})
+        self.assertEqual(response.status_code, 400)
+
     def test_params_reject_unknown_and_out_of_range_values(self):
         self.assertEqual(self.client.post("/api/params", json={"bad": 1}).status_code, 400)
         self.assertEqual(self.client.post("/api/params", json={"dp": 8}).status_code, 400)
