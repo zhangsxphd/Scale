@@ -7,3 +7,5 @@ venv/
 .env.*
 *.log
 
+# Vendor material from a different brand; intentionally excluded.
+称重计说明书/贤衡（废弃）/

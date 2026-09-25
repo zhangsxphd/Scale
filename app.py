@@ -171,12 +171,14 @@ PARAMETERS = {
 def read_params():
     p1 = device.read_registers(0x0007, 7)
     p2 = device.read_registers(0x0012, 4)
-    return {
+    result = {
         "power_on_zero": p1[0], "zero_track": p1[1],
         "stable_range": p1[2], "zero_range": p1[3],
         "filter": p1[5], "ad_rate": p1[6], "dp": p2[0],
         "min_div": p2[1], "max_range_raw": (p2[2] << 16) | p2[3],
     }
+    result["max_range_g"] = result["max_range_raw"] / (10 ** result["dp"])
+    return result
 
 
 @app.route("/api/params", methods=["GET", "POST"])
@@ -187,11 +189,20 @@ def api_params():
         data = request.get_json(silent=True)
         if not isinstance(data, dict) or not data:
             return api_error("请求必须包含 JSON 参数", 400)
-        unknown = set(data) - set(PARAMETERS)
+        unknown = set(data) - set(PARAMETERS) - {"max_range_g"}
         if unknown:
             return api_error(f"未知参数: {', '.join(sorted(unknown))}", 400)
         parsed = {}
         for name, value in data.items():
+            if name == "max_range_g":
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    return api_error("最大量程必须是数字", 400)
+                if not math.isfinite(value) or value <= 0 or value > 3000:
+                    return api_error("最大量程必须在 0–3000 g 之间", 400)
+                parsed[name] = value
+                continue
             try:
                 parsed[name] = int(value)
             except (TypeError, ValueError):
@@ -201,6 +212,15 @@ def api_params():
         current = read_params()
         changed = []
         for name, value in parsed.items():
+            if name == "max_range_g":
+                raw_range = round(value * (10 ** current["dp"]))
+                if raw_range != current["max_range_raw"]:
+                    device.write_u32(0x0014, raw_range)
+                    verify = device.read_registers(0x0014, 2)
+                    if ((verify[0] << 16) | verify[1]) != raw_range:
+                        raise ModbusError("最大量程写入后校验失败")
+                    changed.append(name)
+                continue
             if current[name] == value:
                 continue
             register = PARAMETERS[name][0]
@@ -227,6 +247,25 @@ def api_zero():
         return api_error("去皮失败，设备未确认命令")
 
 
+@app.post("/api/cal_zero")
+def api_cal_zero():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or data.get("confirm") is not True:
+        return api_error("零点标定需要明确确认", 400)
+    try:
+        status = read_status()
+        if status["overload"]:
+            return api_error("当前处于超载状态，不能进行零点标定", 409)
+        if not status["stable"]:
+            return api_error("读数尚未稳定，请等待空载稳定后再标定", 409)
+        # 厂家协议：十进制地址 22（0x0016），写入任意非零 32 位值。
+        device.write_u32(0x0016, 1)
+        return jsonify({"success": True})
+    except ModbusError as exc:
+        logger.warning("零点标定失败: %s", exc)
+        return api_error("零点标定失败，设备未确认写入")
+
+
 @app.post("/api/calibrate")
 def api_calibrate():
     data = request.get_json(silent=True)
@@ -241,12 +280,16 @@ def api_calibrate():
         return api_error("标定重量必须为正数，标定点必须为 1-4", 400)
     try:
         status = read_status()
-        if not status["stable"] or status["overload"]:
-            return api_error("读数未稳定或设备超载，禁止标定", 409)
+        if status["overload"]:
+            max_range = read_params()["max_range_g"]
+            return api_error(f"设备已超载：当前最大量程为 {max_range:g} g，请先调整量程", 409)
+        if not status["stable"]:
+            return api_error("读数尚未稳定，请等待稳定标志后再标定", 409)
         value = round(weight * (10 ** status["dp"]))
         if value > 0xFFFFFFFF:
             return api_error("标定重量超出设备数值范围", 400)
-        device.write_u32(0x0020 + (point - 1) * 2, value)
+        # 厂家协议地址为十进制 30/32/34/36，即 0x001E/0x0020/0x0022/0x0024。
+        device.write_u32(0x001E + (point - 1) * 2, value)
         return jsonify({"success": True, "point": point, "weight": weight})
     except ModbusError as exc:
         logger.warning("标定失败: %s", exc)
