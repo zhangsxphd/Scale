@@ -218,6 +218,7 @@
         // ====== 图表初始化 ======
         let chartInstance = null;
         let stableSince = null;
+        let currentCalibrationState = { zero_complete: false, points: {} };
         const recentWeights = [];
         const maxDataPoints = 60; // 显示60个点 (约12秒)
         const chartData = new Array(maxDataPoints).fill(0);
@@ -391,7 +392,8 @@
         }
 
         async function doCalZero() {
-            if(!confirm('请确认秤台已经完全清空并且读数稳定。\n\n这会修改设备零点参数，继续吗？')) return;
+            const resetWarning = currentCalibrationState.zero_complete ? '\n\n重新标定零点会使全部加载点失效。' : '';
+            if(!confirm(`请确认秤台已经完全清空并且读数稳定。\n\n这会修改设备零点参数。${resetWarning}\n继续吗？`)) return;
             const button = document.getElementById('cal-zero-button');
             if (button.disabled) return;
             button.disabled = true;
@@ -406,8 +408,11 @@
 
         async function doPointCal(point) {
             const weight = document.getElementById(`cal-weight-${point}`).value;
+            const existing = currentCalibrationState.points && currentCalibrationState.points[String(point)];
+            const downstream = Object.keys(currentCalibrationState.points || {}).filter(key => Number(key) > point);
             if(!weight || weight <= 0) return toast("请输入有效的砝码重量", 'error');
-            if(!confirm(`即将把 ${weight}g 写入加载点 ${point}。\n\n这会覆盖该点原有结果；如果只是检查读数，请取消。\n确认秤台稳定并继续吗？`)) return;
+            const impact = existing ? `\n将覆盖该点${downstream.length ? `，并使加载点 ${downstream.join('、')} 失效` : ''}。` : '';
+            if(!confirm(`即将把 ${weight}g 写入加载点 ${point}。${impact}\n\n如果只是检查读数，请取消。\n确认秤台稳定并继续吗？`)) return;
             const button = document.getElementById(`point-button-${point}`);
             if (button.disabled) return;
             button.disabled = true;
@@ -416,10 +421,14 @@
                 const res = await fetch('/api/calibrate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ weight: parseFloat(weight), point, confirm: true })
+                    body: JSON.stringify({ weight: parseFloat(weight), point, confirm: true, overwrite: Boolean(existing) })
                 });
                 const d = await res.json();
-                if(d.success) { toast(`加载点 ${point} 写入成功：${weight}g`); updateCalibrationState(d.state); }
+                if(d.success) {
+                    const note = d.invalidated.length ? `；加载点 ${d.invalidated.join('、')} 需重新标定` : '';
+                    toast(`${d.overwritten ? '重新记录' : '记录'}加载点 ${point} 成功：${weight}g${note}`);
+                    updateCalibrationState(d.state);
+                }
                 else toast(d.error || '标定失败', 'error');
             } catch(e) { toast('网络错误', 'error'); }
             finally { button.disabled = false; }
@@ -430,6 +439,7 @@
         }
 
         function updateCalibrationState(state) {
+            currentCalibrationState = state;
             const completed = Object.keys(state.points || {}).length;
             document.getElementById('cal-progress').innerText = `标定进度 ${state.zero_complete ? completed + 1 : 0} / 5`;
             document.getElementById('cal-zero-button').innerText = state.zero_complete ? '✓ 零点已标定' : '确认空载并标定零点';
@@ -437,13 +447,13 @@
                 const button = document.getElementById(`point-button-${point}`);
                 const input = document.getElementById(`cal-weight-${point}`);
                 const done = Boolean(state.points && state.points[String(point)]);
-                const enabled = state.zero_complete && point === completed + 1;
+                const enabled = state.zero_complete && (done || point === completed + 1);
                 button.disabled = !enabled;
                 button.classList.toggle('opacity-40', !enabled && !done);
                 button.classList.toggle('bg-emerald-600', done);
-                button.innerText = done ? `✓ 已记录 ${state.points[String(point)].weight} g` : `记录 ${input.value} g`;
-                input.disabled = done;
-                input.oninput = () => { if (!done) button.innerText = `记录 ${input.value} g`; };
+                button.innerText = done ? `重新记录 ${state.points[String(point)].weight} g` : `记录 ${input.value} g`;
+                input.disabled = false;
+                input.oninput = () => { button.innerText = done ? `重新记录 ${input.value} g` : `记录 ${input.value} g`; };
             }
         }
 

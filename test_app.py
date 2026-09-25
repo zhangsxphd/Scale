@@ -70,6 +70,26 @@ class ApiTests(unittest.TestCase):
         response = self.client.post("/api/calibrate", json={"weight": 1000, "point": 2, "confirm": True})
         self.assertEqual(response.status_code, 409)
 
+    @patch("app.device.write_u32")
+    @patch("app.read_status", return_value={"stable": True, "overload": False, "dp": 2})
+    def test_rerecording_point_invalidates_only_downstream_points(self, _status, write):
+        app.calibration_state["zero_complete"] = True
+        app.calibration_state["points"] = {
+            "1": {"weight": 500}, "2": {"weight": 1000},
+            "3": {"weight": 2000}, "4": {"weight": 2800},
+        }
+        no_confirm = self.client.post(
+            "/api/calibrate", json={"weight": 1100, "point": 2, "confirm": True}
+        )
+        self.assertEqual(no_confirm.status_code, 409)
+        response = self.client.post(
+            "/api/calibrate", json={"weight": 1100, "point": 2, "confirm": True, "overwrite": True}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["invalidated"], [3, 4])
+        self.assertEqual(set(response.json["state"]["points"]), {"1", "2"})
+        write.assert_called_once_with(0x0020, 110000)
+
 
 class ProtocolTests(unittest.TestCase):
     def test_crc_matches_documented_weight_request(self):

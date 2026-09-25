@@ -285,6 +285,7 @@ def api_calibrate():
     try:
         weight = float(data.get("weight"))
         point = int(data.get("point", 1))
+        overwrite = data.get("overwrite") is True
     except (TypeError, ValueError):
         return api_error("标定重量或标定点无效", 400)
     if not math.isfinite(weight) or weight <= 0 or point not in range(1, 5):
@@ -299,10 +300,14 @@ def api_calibrate():
         with calibration_lock:
             if not calibration_state["zero_complete"]:
                 return api_error("请先完成空载零点标定", 409)
-            expected_point = len(calibration_state["points"]) + 1
-            if point != expected_point:
+            points = calibration_state["points"]
+            existing = str(point) in points
+            expected_point = len(points) + 1
+            if existing and not overwrite:
+                return api_error(f"加载点 {point} 已存在，重新记录需要覆盖确认", 409)
+            if not existing and point != expected_point:
                 return api_error(f"当前应记录加载点 {expected_point}", 409)
-            if point > 1 and weight <= calibration_state["points"][str(point - 1)]["weight"]:
+            if point > 1 and (str(point - 1) not in points or weight <= points[str(point - 1)]["weight"]):
                 return api_error("后续标定点重量必须大于前一标定点", 409)
         value = round(weight * (10 ** status["dp"]))
         if value > 0xFFFFFFFF:
@@ -310,9 +315,13 @@ def api_calibrate():
         # 厂家协议地址为十进制 30/32/34/36，即 0x001E/0x0020/0x0022/0x0024。
         device.write_u32(0x001E + (point - 1) * 2, value)
         with calibration_lock:
+            invalidated = [p for p in range(point + 1, 5) if str(p) in calibration_state["points"]]
+            for invalid_point in range(point, 5):
+                calibration_state["points"].pop(str(invalid_point), None)
             calibration_state["points"][str(point)] = {"weight": weight, "recorded_at": time.time()}
             state = {"zero_complete": True, "points": dict(calibration_state["points"])}
-        return jsonify({"success": True, "point": point, "weight": weight, "state": state})
+        return jsonify({"success": True, "point": point, "weight": weight, "overwritten": existing,
+                        "invalidated": invalidated, "state": state})
     except ModbusError as exc:
         logger.warning("标定失败: %s", exc)
         return api_error("标定失败，设备未确认写入")
