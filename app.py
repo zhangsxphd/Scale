@@ -117,6 +117,8 @@ class ScaleDevice:
 
 
 device = ScaleDevice()
+calibration_lock = threading.Lock()
+calibration_state = {"zero_complete": False, "points": {}}
 
 
 def signed_u32(high, low):
@@ -266,7 +268,10 @@ def api_cal_zero():
             return api_error("读数尚未稳定，请等待空载稳定后再标定", 409)
         # 厂家协议：十进制地址 22（0x0016），写入任意非零 32 位值。
         device.write_u32(0x0016, 1)
-        return jsonify({"success": True})
+        with calibration_lock:
+            calibration_state["zero_complete"] = True
+            calibration_state["points"] = {}
+        return jsonify({"success": True, "state": calibration_state})
     except ModbusError as exc:
         logger.warning("零点标定失败: %s", exc)
         return api_error("零点标定失败，设备未确认写入")
@@ -291,12 +296,23 @@ def api_calibrate():
             return api_error(f"设备已超载：当前最大量程为 {max_range:g} g，请先调整量程", 409)
         if not status["stable"]:
             return api_error("读数尚未稳定，请等待稳定标志后再标定", 409)
+        with calibration_lock:
+            if not calibration_state["zero_complete"]:
+                return api_error("请先完成空载零点标定", 409)
+            expected_point = len(calibration_state["points"]) + 1
+            if point != expected_point:
+                return api_error(f"当前应记录加载点 {expected_point}", 409)
+            if point > 1 and weight <= calibration_state["points"][str(point - 1)]["weight"]:
+                return api_error("后续标定点重量必须大于前一标定点", 409)
         value = round(weight * (10 ** status["dp"]))
         if value > 0xFFFFFFFF:
             return api_error("标定重量超出设备数值范围", 400)
         # 厂家协议地址为十进制 30/32/34/36，即 0x001E/0x0020/0x0022/0x0024。
         device.write_u32(0x001E + (point - 1) * 2, value)
-        return jsonify({"success": True, "point": point, "weight": weight})
+        with calibration_lock:
+            calibration_state["points"][str(point)] = {"weight": weight, "recorded_at": time.time()}
+            state = {"zero_complete": True, "points": dict(calibration_state["points"])}
+        return jsonify({"success": True, "point": point, "weight": weight, "state": state})
     except ModbusError as exc:
         logger.warning("标定失败: %s", exc)
         return api_error("标定失败，设备未确认写入")
@@ -305,6 +321,12 @@ def api_calibrate():
 @app.get("/health")
 def health():
     return jsonify({"status": "ok", "serial_port": PORT})
+
+
+@app.get("/api/calibration/state")
+def api_calibration_state():
+    with calibration_lock:
+        return jsonify({"zero_complete": calibration_state["zero_complete"], "points": dict(calibration_state["points"])})
 
 
 @app.route("/api/config", methods=["GET", "POST"])
@@ -327,6 +349,9 @@ def api_config():
     if port != device.port and port not in known_ports:
         return api_error("指定串口当前不可用", 400)
     device.configure(port, baudrate, address)
+    with calibration_lock:
+        calibration_state["zero_complete"] = False
+        calibration_state["points"] = {}
     return jsonify({"success": True, "port": port, "baudrate": baudrate, "address": address})
 
 

@@ -8,6 +8,8 @@ class ApiTests(unittest.TestCase):
     def setUp(self):
         app.app.config.update(TESTING=True)
         self.client = app.app.test_client()
+        app.calibration_state["zero_complete"] = False
+        app.calibration_state["points"] = {}
 
     def test_health_does_not_touch_hardware(self):
         response = self.client.get("/health")
@@ -53,11 +55,20 @@ class ApiTests(unittest.TestCase):
     @patch("app.device.write_u32")
     @patch("app.read_status", return_value={"stable": True, "overload": False, "dp": 2})
     def test_calibration_scales_weight_and_writes_selected_point(self, _status, write):
+        app.calibration_state["zero_complete"] = True
         response = self.client.post(
             "/api/calibrate", json={"weight": 100, "point": 1, "confirm": True}
         )
         self.assertEqual(response.status_code, 200)
         write.assert_called_once_with(0x001E, 10000)
+
+    @patch("app.read_status", return_value={"stable": True, "overload": False, "dp": 2})
+    def test_calibration_requires_zero_and_point_order(self, _status):
+        response = self.client.post("/api/calibrate", json={"weight": 500, "point": 1, "confirm": True})
+        self.assertEqual(response.status_code, 409)
+        app.calibration_state["zero_complete"] = True
+        response = self.client.post("/api/calibrate", json={"weight": 1000, "point": 2, "confirm": True})
+        self.assertEqual(response.status_code, 409)
 
 
 class ProtocolTests(unittest.TestCase):

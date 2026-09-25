@@ -40,14 +40,14 @@
             <h1 class="text-2xl font-semibold text-white tracking-tight">智能称重中枢</h1>
             <p class="text-slate-400 text-sm mt-1 font-light tracking-wide">MVT-485Pro / MAX: 3kg</p>
         </div>
-        <div id="connection-status" class="flex items-center gap-2 px-4 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-full text-xs font-medium border border-emerald-500/20">
+        <div class="flex items-center gap-2"><div id="connection-status" class="flex items-center gap-2 px-4 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-full text-xs font-medium border border-emerald-500/20">
             <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
             实时连线
-        </div>
+        </div><button onclick="document.getElementById('connection-panel').classList.toggle('hidden')" class="text-xs text-slate-400 hover:text-white">通信设置</button></div>
     </div>
 
     <!-- 连接参数：参考厂家上位机；点击应用才会切换串口 -->
-    <div class="max-w-4xl w-full glass-panel p-4 mb-6 relative z-10">
+    <div id="connection-panel" class="hidden max-w-4xl w-full glass-panel p-4 mb-6 relative z-10">
         <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
             <label class="text-xs text-slate-400">端口号<select id="config-port" class="mt-1 w-full bg-slate-900/70 border border-slate-700 text-slate-200 rounded-lg p-2 text-sm"></select></label>
             <label class="text-xs text-slate-400">波特率<select id="config-baudrate" class="mt-1 w-full bg-slate-900/70 border border-slate-700 text-slate-200 rounded-lg p-2 text-sm"><option>9600</option><option>19200</option><option selected>38400</option><option>57600</option><option>115200</option></select></label>
@@ -70,6 +70,11 @@
             <div class="flex items-baseline gap-4 mt-6 mb-2">
                 <div id="weight-display" class="font-mono text-[clamp(3.5rem,18vw,8rem)] leading-none font-bold tracking-tighter text-white tabular-nums neon-text">0.0</div>
                 <div class="text-3xl font-light text-slate-400">g</div>
+            </div>
+            <div class="grid grid-cols-3 gap-6 text-center mt-5 text-xs text-slate-400">
+                <div>波动<br><strong id="stat-fluctuation" class="text-slate-200 font-mono">--</strong></div>
+                <div>稳定时间<br><strong id="stat-stable-time" class="text-slate-200 font-mono">0.0 s</strong></div>
+                <div>原始值<br><strong id="stat-raw" class="text-slate-200 font-mono">--</strong></div>
             </div>
         </div>
 
@@ -112,28 +117,28 @@
                     <h3 class="text-lg font-medium text-white">第 2 步：多点加载标定</h3>
                     <p class="text-sm text-slate-400 font-light mt-1">四个点同时显示；填写对应砝码重量后，点击该点按钮才会写入。查看读数不需要点击。</p>
                 </div>
-                <span class="text-xs text-amber-300/80">请按重量从小到大使用点 1 → 点 4</span>
+                <div class="text-right"><div id="cal-progress" class="text-sm text-amber-200">标定进度 0 / 5</div><span class="text-xs text-amber-300/80">请按重量从小到大使用点 1 → 点 4</span></div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
-                    <div class="text-sm text-slate-300 mb-3">加载点 1 <span class="text-slate-500">0x001E</span></div>
+                    <div class="text-sm text-slate-300 mb-3">加载点 1 <span class="text-slate-600 text-[10px]">技术地址 0x001E</span></div>
                     <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-1" value="500" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
-                    <button onclick="doPointCal(1)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">应用点 1</button>
+                    <button disabled id="point-button-1" onclick="doPointCal(1)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">记录 500 g</button>
                 </div>
                 <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
-                    <div class="text-sm text-slate-300 mb-3">加载点 2 <span class="text-slate-500">0x0020</span></div>
+                    <div class="text-sm text-slate-300 mb-3">加载点 2 <span class="text-slate-600 text-[10px]">技术地址 0x0020</span></div>
                     <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-2" value="1000" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
-                    <button onclick="doPointCal(2)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">应用点 2</button>
+                    <button disabled id="point-button-2" onclick="doPointCal(2)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">记录 1000 g</button>
                 </div>
                 <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
-                    <div class="text-sm text-slate-300 mb-3">加载点 3 <span class="text-slate-500">0x0022</span></div>
+                    <div class="text-sm text-slate-300 mb-3">加载点 3 <span class="text-slate-600 text-[10px]">技术地址 0x0022</span></div>
                     <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-3" value="2000" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
-                    <button onclick="doPointCal(3)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">应用点 3</button>
+                    <button disabled id="point-button-3" onclick="doPointCal(3)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">记录 2000 g</button>
                 </div>
                 <div class="rounded-2xl bg-slate-900/50 border border-slate-700/60 p-4">
-                    <div class="text-sm text-slate-300 mb-3">加载点 4 <span class="text-slate-500">0x0024</span></div>
-                    <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-4" value="3000" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
-                    <button onclick="doPointCal(4)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">应用点 4</button>
+                    <div class="text-sm text-slate-300 mb-3">加载点 4 <span class="text-slate-600 text-[10px]">技术地址 0x0024</span></div>
+                    <div class="flex items-center gap-2 mb-3"><input type="number" id="cal-weight-4" value="2800" min="0.01" step="0.01" class="w-full bg-slate-950/60 text-white font-mono text-lg text-center rounded-lg p-2 outline-none"><span class="text-slate-500">g</span></div>
+                    <button disabled id="point-button-4" onclick="doPointCal(4)" class="w-full py-2.5 bg-sky-500/90 text-white font-medium rounded-lg hover:bg-sky-400">记录 2800 g</button>
                 </div>
             </div>
         </div>
@@ -212,6 +217,8 @@
     <script>
         // ====== 图表初始化 ======
         let chartInstance = null;
+        let stableSince = null;
+        const recentWeights = [];
         const maxDataPoints = 60; // 显示60个点 (约12秒)
         const chartData = new Array(maxDataPoints).fill(0);
         const chartLabels = new Array(maxDataPoints).fill('');
@@ -281,6 +288,13 @@
                     const w = data.weight;
                     
                     document.getElementById('weight-display').innerText = w.toFixed(data.dp);
+                    document.getElementById('stat-raw').innerText = data.raw;
+                    recentWeights.push(w);
+                    if (recentWeights.length > 20) recentWeights.shift();
+                    const recentRange = Math.max(...recentWeights) - Math.min(...recentWeights);
+                    document.getElementById('stat-fluctuation').innerText = `±${(recentRange / 2).toFixed(data.dp)} g`;
+                    if (data.stable) stableSince ??= Date.now(); else stableSince = null;
+                    document.getElementById('stat-stable-time').innerText = stableSince ? `${((Date.now() - stableSince) / 1000).toFixed(1)} s` : '0.0 s';
                     
                     chartData.push(w);
                     chartData.shift(); 
@@ -331,6 +345,7 @@
         }
         fetchStatus();
         loadConfig();
+        loadCalibrationState();
         setInterval(fetchStatus, 500);
 
         // ... (后面保存原来的 doZero/doCalZero/doCalibrate/toggleAdvanced/loadParams/saveParams 逻辑)
@@ -383,7 +398,7 @@
             try {
                 const res = await fetch('/api/cal_zero', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({confirm: true}) });
                 const d = await res.json();
-                if(res.ok) toast('空载零点标定完成');
+                if(res.ok) { toast('空载零点标定完成'); updateCalibrationState(d.state); }
                 else toast(d.error || '零点标定失败', 'error');
             } catch(e) { toast('网络错误', 'error'); }
             finally { button.disabled = false; }
@@ -393,7 +408,7 @@
             const weight = document.getElementById(`cal-weight-${point}`).value;
             if(!weight || weight <= 0) return toast("请输入有效的砝码重量", 'error');
             if(!confirm(`即将把 ${weight}g 写入加载点 ${point}。\n\n这会覆盖该点原有结果；如果只是检查读数，请取消。\n确认秤台稳定并继续吗？`)) return;
-            const button = document.querySelector(`button[onclick="doPointCal(${point})"]`);
+            const button = document.getElementById(`point-button-${point}`);
             if (button.disabled) return;
             button.disabled = true;
             
@@ -404,10 +419,32 @@
                     body: JSON.stringify({ weight: parseFloat(weight), point, confirm: true })
                 });
                 const d = await res.json();
-                if(d.success) toast(`加载点 ${point} 写入成功：${weight}g`);
+                if(d.success) { toast(`加载点 ${point} 写入成功：${weight}g`); updateCalibrationState(d.state); }
                 else toast(d.error || '标定失败', 'error');
             } catch(e) { toast('网络错误', 'error'); }
             finally { button.disabled = false; }
+        }
+
+        async function loadCalibrationState() {
+            try { const res = await fetch('/api/calibration/state'); updateCalibrationState(await res.json()); } catch(e) {}
+        }
+
+        function updateCalibrationState(state) {
+            const completed = Object.keys(state.points || {}).length;
+            document.getElementById('cal-progress').innerText = `标定进度 ${state.zero_complete ? completed + 1 : 0} / 5`;
+            document.getElementById('cal-zero-button').innerText = state.zero_complete ? '✓ 零点已标定' : '确认空载并标定零点';
+            for (let point = 1; point <= 4; point++) {
+                const button = document.getElementById(`point-button-${point}`);
+                const input = document.getElementById(`cal-weight-${point}`);
+                const done = Boolean(state.points && state.points[String(point)]);
+                const enabled = state.zero_complete && point === completed + 1;
+                button.disabled = !enabled;
+                button.classList.toggle('opacity-40', !enabled && !done);
+                button.classList.toggle('bg-emerald-600', done);
+                button.innerText = done ? `✓ 已记录 ${state.points[String(point)].weight} g` : `记录 ${input.value} g`;
+                input.disabled = done;
+                input.oninput = () => { if (!done) button.innerText = `记录 ${input.value} g`; };
+            }
         }
 
         function toggleAdvanced() {
